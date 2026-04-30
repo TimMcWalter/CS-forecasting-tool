@@ -66,13 +66,14 @@ This creates one training row per `date + country + sku`.
 Run:
 
 ```bash
-uv run python train.py
+uv run python train.py config.yaml
 ```
 
 Feature engineering and split settings come from `config.yaml`:
 
 - `feature_config` for lag/moving/exponential-moving features
 - `training_config` for train/val/test split and forecast horizon
+- `data_config` for file paths, key columns, and output directory
 
 ## Training Exports
 
