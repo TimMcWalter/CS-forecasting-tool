@@ -255,7 +255,6 @@ def train_and_predict(
 
     predictions_rows = []
     importance_rows = []
-    global_rows = []
 
     for (country, sku), grp in model_df.groupby(["country", "sku"], sort=False):
         grp = grp.sort_values("date").reset_index(drop=True)
@@ -348,12 +347,23 @@ def train_and_predict(
         ["country", "sku", "importance"], ascending=[True, True, False]
     )
 
-    global_df = (
-        predictions_df.groupby(["date", "country", "split"], as_index=False)[
+    # Country-agnostic SKU table: aggregate over countries => date x sku x split.
+    global_by_sku_df = (
+        predictions_df.groupby(["date", "sku", "split"], as_index=False)[
             ["actual_demand", "predicted_demand"]
         ]
         .sum(min_count=1)
+        .sort_values(["date", "sku", "split"])
+        .reset_index(drop=True)
+    )
+
+    # Fully global table: aggregate over all countries and all SKUs => date x split.
+    global_all_df = (
+        predictions_df.groupby(["date", "split"], as_index=False)[["actual_demand", "predicted_demand"]]
+        .sum(min_count=1)
         .rename(columns={"actual_demand": "actual_demand_sum", "predicted_demand": "predicted_demand_sum"})
+        .sort_values(["date", "split"])
+        .reset_index(drop=True)
     )
 
     out_path = Path(outdir)
@@ -361,20 +371,24 @@ def train_and_predict(
 
     pred_path = out_path / "predictions_by_sku_country.csv"
     imp_path = out_path / "feature_importance_by_sku_country.csv"
-    global_path = out_path / "global_predictions_by_country.csv"
+    global_by_sku_path = out_path / "global_predictions_by_sku.csv"
+    global_all_path = out_path / "global_predictions_all.csv"
 
     predictions_df.to_csv(pred_path, index=False)
     feature_importance_df.to_csv(imp_path, index=False)
-    global_df.to_csv(global_path, index=False)
+    global_by_sku_df.to_csv(global_by_sku_path, index=False)
+    global_all_df.to_csv(global_all_path, index=False)
 
     print(f"Saved: {pred_path}")
     print(f"Saved: {imp_path}")
-    print(f"Saved: {global_path}")
+    print(f"Saved: {global_by_sku_path}")
+    print(f"Saved: {global_all_path}")
 
     return {
         "predictions": predictions_df,
         "feature_importance": feature_importance_df,
-        "global": global_df,
+        "global_by_sku": global_by_sku_df,
+        "global_all": global_all_df,
     }
 
 
