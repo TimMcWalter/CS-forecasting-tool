@@ -1,5 +1,6 @@
 {
   "summary": {
+    "config_path": "config.yaml",
     "n_rows_evaluated": 118950,
     "n_models_country_sku": 150,
     "dataset_sizes": {
@@ -7,7 +8,11 @@
       "validation": 0.2,
       "testing": 0.2
     },
-    "forecast_horizon": 30
+    "forecast_horizon": 30,
+    "min_history_length": 10,
+    "ridge_alpha": 1e-06,
+    "non_negative_predictions": true,
+    "future_exogenous_strategy": "carry_last"
   },
   "global_metrics_overall": {
     "n_obs": 118950,

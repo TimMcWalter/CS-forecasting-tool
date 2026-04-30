@@ -214,12 +214,13 @@ def train_and_predict(config_path: str):
 
     out_path = Path(data_cfg["output_dir"])
     out_path.mkdir(parents=True, exist_ok=True)
+    export_names = data_cfg["export_filenames"]
 
-    pred_path = out_path / "predictions_by_sku_country.csv"
-    imp_path = out_path / "feature_importance_by_sku_country.csv"
-    global_by_sku_path = out_path / "global_predictions_by_sku.csv"
-    global_all_path = out_path / "global_predictions_all.csv"
-    metrics_json_path = out_path / "training_metrics.json"
+    pred_path = out_path / export_names["predictions_by_sku_country"]
+    imp_path = out_path / export_names["feature_importance_by_sku_country"]
+    global_by_sku_path = out_path / export_names["global_predictions_by_sku"]
+    global_all_path = out_path / export_names["global_predictions_all"]
+    metrics_json_path = out_path / export_names["training_metrics"]
 
     predictions_df.to_csv(pred_path, index=False)
     feature_importance_df.to_csv(imp_path, index=False)

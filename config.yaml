@@ -2,6 +2,12 @@ data_config:
   company_path: generated_data/company.csv
   demand_path: generated_data/demand.csv
   output_dir: generated_data/model_outputs
+  export_filenames:
+    predictions_by_sku_country: predictions_by_sku_country.csv
+    feature_importance_by_sku_country: feature_importance_by_sku_country.csv
+    global_predictions_by_sku: global_predictions_by_sku.csv
+    global_predictions_all: global_predictions_all.csv
+    training_metrics: training_metrics.json
   keys:
     date: date
     country: country

@@ -74,6 +74,7 @@ Feature engineering and split settings come from `config.yaml`:
 - `feature_config` for lag/moving/exponential-moving features
 - `training_config` for train/val/test split and forecast horizon
 - `data_config` for file paths, key columns, and output directory
+- `data_config.export_filenames` for output file names
 
 ## Training Exports
 
