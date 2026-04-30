@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -221,6 +222,26 @@ def _split_boundaries(n: int, train_ratio: float, val_ratio: float) -> Tuple[int
     return train_end, val_end
 
 
+def _metrics_from_frame(df: pd.DataFrame, actual_col: str, pred_col: str) -> Dict:
+    if df.empty:
+        return {"n_obs": 0, "mae": None, "rmse": None, "mape_pct": None}
+
+    actual = df[actual_col].to_numpy(dtype=float)
+    pred = df[pred_col].to_numpy(dtype=float)
+    err = pred - actual
+
+    mae = float(np.mean(np.abs(err)))
+    rmse = float(np.sqrt(np.mean(err**2)))
+
+    non_zero_mask = np.abs(actual) > 1e-12
+    if np.any(non_zero_mask):
+        mape = float(np.mean(np.abs((err[non_zero_mask]) / actual[non_zero_mask])) * 100.0)
+    else:
+        mape = None
+
+    return {"n_obs": int(len(df)), "mae": mae, "rmse": rmse, "mape_pct": mape}
+
+
 def train_and_predict(
     company_path: str = "generated_data/company.csv",
     demand_path: str = "generated_data/demand.csv",
@@ -366,6 +387,43 @@ def train_and_predict(
         .reset_index(drop=True)
     )
 
+    eval_df = predictions_df[predictions_df["split"].isin(["train", "validation", "test"])].copy()
+    eval_df = eval_df.dropna(subset=["actual_demand", "predicted_demand"])
+
+    # Per-model metrics: one row per (country, sku, split).
+    per_model_metrics = []
+    for (country, sku, split), grp in eval_df.groupby(["country", "sku", "split"], sort=False):
+        metric = _metrics_from_frame(grp, "actual_demand", "predicted_demand")
+        per_model_metrics.append(
+            {
+                "country": country,
+                "sku": sku,
+                "split": split,
+                **metric,
+            }
+        )
+
+    # Per-model overall metrics across all non-forecast rows.
+    per_model_overall = []
+    for (country, sku), grp in eval_df.groupby(["country", "sku"], sort=False):
+        metric = _metrics_from_frame(grp, "actual_demand", "predicted_demand")
+        per_model_overall.append(
+            {
+                "country": country,
+                "sku": sku,
+                "split": "all_non_forecast",
+                **metric,
+            }
+        )
+
+    # Global metrics over all models by split.
+    global_metrics_by_split = []
+    for split, grp in eval_df.groupby("split", sort=False):
+        metric = _metrics_from_frame(grp, "actual_demand", "predicted_demand")
+        global_metrics_by_split.append({"split": split, **metric})
+
+    global_metrics_overall = _metrics_from_frame(eval_df, "actual_demand", "predicted_demand")
+
     out_path = Path(outdir)
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -373,22 +431,39 @@ def train_and_predict(
     imp_path = out_path / "feature_importance_by_sku_country.csv"
     global_by_sku_path = out_path / "global_predictions_by_sku.csv"
     global_all_path = out_path / "global_predictions_all.csv"
+    metrics_json_path = out_path / "training_metrics.json"
 
     predictions_df.to_csv(pred_path, index=False)
     feature_importance_df.to_csv(imp_path, index=False)
     global_by_sku_df.to_csv(global_by_sku_path, index=False)
     global_all_df.to_csv(global_all_path, index=False)
 
+    metrics_payload = {
+        "summary": {
+            "n_rows_evaluated": int(len(eval_df)),
+            "n_models_country_sku": int(eval_df[["country", "sku"]].drop_duplicates().shape[0]),
+            "dataset_sizes": train_cfg["dataset_sizes"],
+            "forecast_horizon": horizon,
+        },
+        "global_metrics_overall": global_metrics_overall,
+        "global_metrics_by_split": global_metrics_by_split,
+        "per_model_metrics_by_split": per_model_metrics,
+        "per_model_metrics_overall": per_model_overall,
+    }
+    metrics_json_path.write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
+
     print(f"Saved: {pred_path}")
     print(f"Saved: {imp_path}")
     print(f"Saved: {global_by_sku_path}")
     print(f"Saved: {global_all_path}")
+    print(f"Saved: {metrics_json_path}")
 
     return {
         "predictions": predictions_df,
         "feature_importance": feature_importance_df,
         "global_by_sku": global_by_sku_df,
         "global_all": global_all_df,
+        "metrics": metrics_payload,
     }
 
 
