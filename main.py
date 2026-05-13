@@ -3,8 +3,10 @@ from pathlib import Path
 import pandas as pd
 
 from datagen import datagen
+'''
+Script to pilot data gen, 
 
-
+'''
 def main(
     sku_count: int,
     startdate: str,
@@ -23,7 +25,11 @@ def main(
 
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-
+    #
+    '''
+    Copy results of the datagen into dedicated export df
+    espacially to ensure dataformating
+    '''
     company_export = result["company"].copy()
     company_export["date"] = pd.to_datetime(company_export["date"]).dt.normalize()
     company_export = company_export[

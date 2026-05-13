@@ -14,11 +14,13 @@ from preprocessing import build_features, load_config, prepare_model_data
 def _fit_linear_regression(X: np.ndarray, y: np.ndarray, ridge_alpha: float) -> np.ndarray:
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float)
-    X_aug = np.column_stack([np.ones(len(X)), X])
+    X_aug = np.column_stack([np.ones(len(X)), X]) #fit intercept
     eye = np.eye(X_aug.shape[1], dtype=float)
     eye[0, 0] = 0.0
     beta = np.linalg.pinv(X_aug.T @ X_aug + float(ridge_alpha) * eye) @ X_aug.T @ y
+    #beta = inverse(XᵀX + alpha I) Xᵀy
     return beta
+    #expect [intercept, coef 1, coef 2 ...]
 
 
 def _predict_linear(beta: np.ndarray, X: np.ndarray) -> np.ndarray:
@@ -28,6 +30,7 @@ def _predict_linear(beta: np.ndarray, X: np.ndarray) -> np.ndarray:
 
 
 def _split_boundaries(n: int, train_ratio: float, val_ratio: float) -> Tuple[int, int]:
+    #define the split
     train_end = int(n * train_ratio)
     val_end = train_end + int(n * val_ratio)
     train_end = max(1, min(train_end, n))
@@ -36,6 +39,8 @@ def _split_boundaries(n: int, train_ratio: float, val_ratio: float) -> Tuple[int
 
 
 def _metrics_from_frame(df: pd.DataFrame, actual_col: str, pred_col: str) -> Dict:
+    #calc error based on pred and actual
+    #we will send each time different df, so this should be robust (for example different groupby's)
     if df.empty:
         return {"n_obs": 0, "mae": None, "rmse": None, "mape_pct": None}
 
@@ -57,7 +62,7 @@ def _metrics_from_frame(df: pd.DataFrame, actual_col: str, pred_col: str) -> Dic
 
 def train_and_predict(config_path: str):
     config = load_config(config_path)
-
+    #ensure names
     data_cfg = config["data_config"]
     keys = data_cfg["keys"]
     train_cfg = config["training_config"]
@@ -66,7 +71,8 @@ def train_and_predict(config_path: str):
     country_col = keys["country"]
     sku_col = keys["sku"]
     target_col = keys["target"]
-
+    
+    #get settings
     train_ratio = float(train_cfg["dataset_sizes"]["training"])
     val_ratio = float(train_cfg["dataset_sizes"]["validation"])
     horizon = int(train_cfg["forecast_horizon"])
@@ -74,37 +80,41 @@ def train_and_predict(config_path: str):
     ridge_alpha = float(train_cfg["ridge_alpha"])
     non_negative = bool(train_cfg["non_negative_predictions"])
     future_exog_strategy = str(train_cfg["future_exogenous_strategy"]).strip().lower()
-
+    # carry forward if blank
     if future_exog_strategy != "carry_last":
         raise ValueError("Only future_exogenous_strategy='carry_last' is supported in this MVP.")
 
     model_df, feature_cols = prepare_model_data(config)
     model_df = model_df.sort_values([date_col, country_col, sku_col]).reset_index(drop=True)
-
+    #fix output
     predictions_rows = []
     importance_rows = []
 
     company_feature_columns = list(data_cfg["company_feature_columns"])
 
     for (country, sku), grp in model_df.groupby([country_col, sku_col], sort=False):
+        #train model for each country x sku
         grp = grp.sort_values(date_col).reset_index(drop=True)
         n = len(grp)
         if n < min_history_length:
             continue
 
         train_end, val_end = _split_boundaries(n, train_ratio, val_ratio)
-
+        #get all feats and targ
         X = grp[feature_cols].to_numpy(dtype=float)
         y = grp[target_col].to_numpy(dtype=float)
 
+        #for the training only get until train end date
         X_train = X[:train_end]
         y_train = y[:train_end]
         beta = _fit_linear_regression(X_train, y_train, ridge_alpha=ridge_alpha)
 
+        #predict with the fit
         y_pred_hist = _predict_linear(beta, X)
         if non_negative:
             y_pred_hist = np.maximum(0.0, y_pred_hist)
 
+        #df with split column that explains what split we are in
         for i, row in grp.iterrows():
             split = "train" if i < train_end else ("validation" if i < val_end else "test")
             predictions_rows.append(
@@ -117,7 +127,7 @@ def train_and_predict(config_path: str):
                     "split": split,
                 }
             )
-
+        #get importance score and normalize to feature span
         train_std = np.std(X_train, axis=0)
         scaled = np.abs(beta[1:] * train_std)
         denom = float(np.sum(scaled))
@@ -134,13 +144,16 @@ def train_and_predict(config_path: str):
             )
 
         # Recursive future prediction.
+        #forecast one day at a a time
         hist_cols = [date_col, target_col, *company_feature_columns]
         hist = grp[hist_cols].copy()
         for _ in range(horizon):
             next_date = hist[date_col].iloc[-1] + pd.Timedelta(days=1)
+            #populate actual with NaN (unkown demand)
             next_row = {date_col: next_date, target_col: np.nan}
             for col in company_feature_columns:
                 next_row[col] = hist[col].iloc[-1]
+                #carry company features foward to keep predicting
 
             hist = pd.concat([hist, pd.DataFrame([next_row])], ignore_index=True)
             tmp = hist.copy()
@@ -150,11 +163,13 @@ def train_and_predict(config_path: str):
             x_next = tmp_fe.iloc[-1][feature_cols].to_numpy(dtype=float)
             x_next = np.nan_to_num(x_next, nan=0.0)
 
+            #predict next day 
             y_next = float(_predict_linear(beta, x_next.reshape(1, -1))[0])
             if non_negative:
                 y_next = max(0.0, y_next)
-
+            #add pred to history for walk foward
             hist.loc[hist.index[-1], target_col] = y_next
+            #save forecast
             predictions_rows.append(
                 {
                     date_col: next_date,
@@ -165,14 +180,17 @@ def train_and_predict(config_path: str):
                     "split": "forecast",
                 }
             )
-
+    #create pred df
     predictions_df = pd.DataFrame(predictions_rows).sort_values(
         [date_col, country_col, sku_col]
     ).reset_index(drop=True)
+
+    #create feats importance df
     feature_importance_df = pd.DataFrame(importance_rows).sort_values(
         [country_col, sku_col, "importance"], ascending=[True, True, False]
     )
 
+    #aggregate country agnostic
     global_by_sku_df = (
         predictions_df.groupby([date_col, sku_col, "split"], as_index=False)[
             ["actual_demand", "predicted_demand"]
@@ -181,7 +199,7 @@ def train_and_predict(config_path: str):
         .sort_values([date_col, sku_col, "split"])
         .reset_index(drop=True)
     )
-
+    # create total demand df
     global_all_df = (
         predictions_df.groupby([date_col, "split"], as_index=False)[["actual_demand", "predicted_demand"]]
         .sum(min_count=1)
@@ -189,15 +207,17 @@ def train_and_predict(config_path: str):
         .sort_values([date_col, "split"])
         .reset_index(drop=True)
     )
-
+    # evaluation df, drop "prediction" as not used for eval
     eval_df = predictions_df[predictions_df["split"].isin(["train", "validation", "test"])].copy()
     eval_df = eval_df.dropna(subset=["actual_demand", "predicted_demand"])
 
+    # get metrics for each model split , sku x country
     per_model_metrics = []
     for (country, sku, split), grp in eval_df.groupby([country_col, sku_col, "split"], sort=False):
         metric = _metrics_from_frame(grp, "actual_demand", "predicted_demand")
         per_model_metrics.append({country_col: country, sku_col: sku, "split": split, **metric})
 
+    # get metrics for each model sku x country
     per_model_overall = []
     for (country, sku), grp in eval_df.groupby([country_col, sku_col], sort=False):
         metric = _metrics_from_frame(grp, "actual_demand", "predicted_demand")
@@ -205,6 +225,7 @@ def train_and_predict(config_path: str):
             {country_col: country, sku_col: sku, "split": "all_non_forecast", **metric}
         )
 
+    #get general metrics (so 3)
     global_metrics_by_split = []
     for split, grp in eval_df.groupby("split", sort=False):
         metric = _metrics_from_frame(grp, "actual_demand", "predicted_demand")
@@ -227,6 +248,7 @@ def train_and_predict(config_path: str):
     global_by_sku_df.to_csv(global_by_sku_path, index=False)
     global_all_df.to_csv(global_all_path, index=False)
 
+    #prepare JSON payload with content for UI
     metrics_payload = {
         "summary": {
             "config_path": str(config_path),

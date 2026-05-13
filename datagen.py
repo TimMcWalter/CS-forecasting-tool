@@ -4,7 +4,10 @@ from urllib.request import urlopen
 
 import numpy as np
 import pandas as pd
+''' 
 
+IMPORTANT: Use Date as Primary Key, and expect %Y-%m-%d
+'''
 # Public holiday API endpoint (Nager.Date) used for CH/DE/AT holiday signals.
 HOLIDAY_API_URL = "https://date.nager.at/api/v3/PublicHolidays/{year}/{country}"
 

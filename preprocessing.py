@@ -8,6 +8,7 @@ import yaml
 
 
 def _require(d: Dict, path: str):
+    # parser for YAML file
     node = d
     for key in path.split("."):
         if not isinstance(node, dict) or key not in node:
@@ -17,6 +18,7 @@ def _require(d: Dict, path: str):
 
 
 def _normalize_dataset_sizes(dataset_sizes: Dict) -> Dict:
+    #make sure the splitting is full and even
     training = float(dataset_sizes.get("training"))
     validation = float(dataset_sizes.get("validation"))
     testing = float(dataset_sizes.get("testing"))
@@ -69,6 +71,7 @@ def load_config(config_path: str) -> Dict:
 
 
 def load_merged_training_table(config: Dict) -> pd.DataFrame:
+    #checks for naming
     data_cfg = config["data_config"]
     keys = data_cfg["keys"]
     date_col = keys["date"]
@@ -78,7 +81,7 @@ def load_merged_training_table(config: Dict) -> pd.DataFrame:
     demand_df = pd.read_csv(data_cfg["demand_path"])
     company_df[date_col] = pd.to_datetime(company_df[date_col])
     demand_df[date_col] = pd.to_datetime(demand_df[date_col])
-
+    #merge on date col
     merge_keys = [date_col, country_col]
     df = demand_df.merge(company_df, on=merge_keys, how="left")
 
@@ -104,7 +107,7 @@ def build_features(df: pd.DataFrame, config: Dict) -> Tuple[pd.DataFrame, List[s
 
     out = df.copy().sort_values([country_col, sku_col, date_col]).reset_index(drop=True)
     groups_cfg = feature_cfg["groups"]
-
+    # go through yaml feats. and calc 
     for group_name, group_spec in groups_cfg.items():
         includes = list(group_spec.get("includes", []))
         apply_ops = dict(group_spec.get("apply", {}))
